@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>⚔ World Map</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #060a14; }
+    #app { width: 100vw; height: 100vh; display: flex; flex-direction: column; font-family: 'Courier New', monospace; background: #060a14; overflow: hidden; user-select: none; }
+
+    /* Top bar */
+    #topbar {
+      background: #0b1120;
+      border-bottom: 1px solid #1e3a5f;
+      padding: 8px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    #topbar .title { color: #7dd3fc; font-weight: bold; font-size: 14px; letter-spacing: 3px; }
+    #legend { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 4px; }
+    .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .legend-label { font-size: 9px; letter-spacing: 1px; }
+
+    /* Map viewport */
+    #viewport {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      cursor: grab;
+    }
+    #viewport.dragging { cursor: grabbing; }
+
+    /* World canvas */
+    #world {
+      position: absolute;
+      left: 0; top: 0;
+      transform-origin: 0 0;
+    }
+
+    /* SVG edges */
+    #edges-svg {
+      position: absolute;
+      left: 0; top: 0;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    /* Nodes */
+    .node {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .node-circle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      font-size: 13px;
+    }
+    .node-label {
+      position: absolute;
+      top: 46px;
+      left: 50%;
+      transform: translateX(-50%);
+      white-space: nowrap;
+      background: rgba(11,17,32,0.93);
+      border-radius: 3px;
+      font-size: 10px;
+      padding: 2px 6px;
+      pointer-events: none;
+      z-index: 30;
+      letter-spacing: 0.5px;
+      display: none;
+    }
+    .node:hover .node-label,
+    .node.selected .node-label { display: block; }
+
+    /* Zoom controls */
+    #zoom-controls {
+      position: absolute;
+      right: 14px;
+      bottom: 70px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 50;
+    }
+    .zoom-btn {
+      width: 36px; height: 36px;
+      border-radius: 6px;
+      background: #0b1120;
+      border: 1px solid #1e3a5f;
+      color: #7dd3fc;
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      touch-action: manipulation;
+    }
+    .zoom-btn.reset { color: #475569; font-size: 16px; }
+
+    /* Info panel */
+    #info-panel {
+      position: absolute;
+      bottom: 14px;
+      left: 14px;
+      width: 230px;
+      max-height: 60vh;
+      overflow-y: auto;
+      background: rgba(11,17,32,0.95);
+      border-radius: 8px;
+      padding: 14px 14px 10px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.55);
+      display: none;
+      z-index: 60;
+    }
+    #info-panel.visible { display: block; }
+    #info-emoji { font-size: 26px; margin-bottom: 6px; }
+    #info-name { color: #e2e8f0; font-weight: bold; font-size: 13px; margin-bottom: 6px; }
+    #info-tags { display: flex; gap: 6px; margin-bottom: 10px; }
+    .tag {
+      padding: 1px 7px;
+      border-radius: 3px;
+      font-size: 9px;
+      letter-spacing: 1px;
+    }
+    #info-conn-label { color: #64748b; font-size: 9px; letter-spacing: 1px; margin-bottom: 4px; }
+    #info-conns { display: flex; flex-direction: column; gap: 3px; }
+    .conn-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 8px;
+      background: #0f1a2e;
+      border: 1px solid #1e3a5f;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .conn-item:hover { border-color: var(--accent); }
+    .conn-emoji { font-size: 13px; }
+    .conn-name { color: #cbd5e1; font-size: 10px; }
+    .conn-sub { font-size: 9px; }
+    #info-close {
+      margin-top: 12px;
+      width: 100%;
+      padding: 5px 0;
+      background: transparent;
+      border: 1px solid #1e3a5f;
+      color: #475569;
+      font-size: 10px;
+      cursor: pointer;
+      border-radius: 4px;
+      letter-spacing: 1px;
+      font-family: 'Courier New', monospace;
+    }
+
+    /* Bottom bar */
+    #bottombar {
+      background: #0b1120;
+      border-top: 1px solid #1e3a5f;
+      padding: 5px 16px;
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    #bottombar span { color: #334155; font-size: 10px; }
+    #bottombar .sep { color: #1e3a5f; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <!-- TOP BAR -->
+  <div id="topbar">
+    <span class="title">⚔ WORLD MAP</span>
+    <div id="legend"></div>
+  </div>
+
+  <!-- MAP VIEWPORT -->
+  <div id="viewport">
+    <div id="world">
+      <svg id="edges-svg" width="1600" height="1200"></svg>
+    </div>
+    <div id="zoom-controls">
+      <button class="zoom-btn" id="btn-zoomin">＋</button>
+      <button class="zoom-btn" id="btn-zoomout">－</button>
+      <button class="zoom-btn reset" id="btn-reset">⊡</button>
+    </div>
+    <div id="info-panel">
+      <div id="info-emoji"></div>
+      <div id="info-name"></div>
+      <div id="info-tags"></div>
+      <div id="info-conn-label">CONNECTIONS</div>
+      <div id="info-conns"></div>
+      <button id="info-close">CLOSE</button>
+    </div>
+  </div>
+
+  <!-- BOTTOM BAR -->
+  <div id="bottombar">
+    <span id="stats"></span>
+    <span class="sep">|</span>
+    <span>Pinch or scroll to zoom · Drag to pan</span>
+  </div>
+</div>
+
+<script>
+// ── Data ─────────────────────────────────────────────────────────────────────
+const RAW = {
+  forgotten_crypt_entrance: { name:"Forgotten Crypt Entrance", emoji:"🏚️", level:10, safe:true,  conn:["haunted_hollow","shadow_woods"] },
+  volcanic_rift_gate:       { name:"Volcanic Rift Gate",       emoji:"🌋", level:20, safe:true,  conn:["magma_chamber","volcanic_ridge","scorched_dunes"] },
+  frozen_abyss_portal:      { name:"Frozen Abyss Portal",      emoji:"❄️", level:30, safe:true,  conn:["frozen_peaks","crystal_cavern"] },
+  starter_village:  { name:"Starter Village",  emoji:"🏘️", level:1,  safe:true,  conn:["green_meadow","peaceful_forest","riverside_path"] },
+  trading_post:     { name:"Trading Post",     emoji:"🏪", level:1,  safe:true,  conn:["sunny_hills","flower_garden","old_bridge"] },
+  fishing_village:  { name:"Fishing Village",  emoji:"🎣", level:1,  safe:true,  conn:["sandy_beach","shallow_pond","misty_grove"] },
+  lakeside_inn:     { name:"Lakeside Inn",     emoji:"🏨", level:1,  safe:true,  conn:["calm_lake","willow_grove","stone_bridge"] },
+  farmers_market:   { name:"Farmer's Market",  emoji:"🌽", level:1,  safe:true,  conn:["wheat_field","apple_orchard","country_road"] },
+  riverside_camp:   { name:"Riverside Camp",   emoji:"⛺", level:2,  safe:true,  conn:["rushing_river","pebble_beach","willow_grove","riverside_path"] },
+  woodland_outpost: { name:"Woodland Outpost", emoji:"🏕️", level:2,  safe:true,  conn:["pine_forest","oak_woodland","hunters_trail"] },
+  jade_temple:      { name:"Jade Temple",      emoji:"🏯", level:3,  safe:true,  conn:["bamboo_forest","twilight_meadow","iron_mine","shadow_woods"] },
+  miners_rest:      { name:"Miner's Rest",     emoji:"🏕️", level:4,  safe:true,  conn:["iron_mine","copper_canyon","silver_lake"] },
+  mountain_outpost: { name:"Mountain Outpost", emoji:"🏔️", level:4,  safe:true,  conn:["frozen_peaks","crystal_cavern","volcanic_ridge","echo_caves"] },
+  desert_oasis:     { name:"Desert Oasis",     emoji:"🏜️", level:4,  safe:true,  conn:["scorched_dunes","sandstorm_valley","ancient_ruins"] },
+  fairy_village:    { name:"Fairy Village",    emoji:"🧚", level:5,  safe:true,  conn:["enchanted_grove","mystic_waterfall","crystal_forest"] },
+  floating_sanctuary:{ name:"Floating Sanctuary",emoji:"☁️",level:5, safe:true,  conn:["sky_gardens","thunder_peaks","celestial_bridge"] },
+  underground_city: { name:"Underground City", emoji:"🏛️", level:5,  safe:true,  conn:["deep_mines","crystal_labyrinth","magma_chamber","abyssal_trench"] },
+  mystic_temple:    { name:"Mystic Temple",    emoji:"🛕", level:6,  safe:true,  conn:["spirit_realm","void_gate","astral_plane","crystal_labyrinth"] },
+  green_meadow:     { name:"Green Meadow",    emoji:"🌾", level:1,  safe:false, conn:["starter_village","peaceful_forest","clover_field"] },
+  peaceful_forest:  { name:"Peaceful Forest", emoji:"🌲", level:1,  safe:false, conn:["starter_village","green_meadow","sunny_hills"] },
+  riverside_path:   { name:"Riverside Path",  emoji:"🌊", level:1,  safe:false, conn:["starter_village","shallow_pond","riverside_camp"] },
+  sunny_hills:      { name:"Sunny Hills",     emoji:"⛰️", level:1,  safe:false, conn:["trading_post","peaceful_forest","flower_garden"] },
+  flower_garden:    { name:"Flower Garden",   emoji:"🌸", level:1,  safe:false, conn:["trading_post","sunny_hills","old_bridge"] },
+  sandy_beach:      { name:"Sandy Beach",     emoji:"🏖️", level:1,  safe:false, conn:["fishing_village","shallow_pond","mystic_waterfall"] },
+  shallow_pond:     { name:"Shallow Pond",    emoji:"💧", level:1,  safe:false, conn:["fishing_village","sandy_beach","riverside_path","misty_grove","muddy_swamp"] },
+  calm_lake:        { name:"Calm Lake",       emoji:"🏞️", level:1,  safe:false, conn:["lakeside_inn","pebble_beach"] },
+  willow_grove:     { name:"Willow Grove",    emoji:"🌿", level:1,  safe:false, conn:["lakeside_inn","riverside_camp","stone_bridge"] },
+  wheat_field:      { name:"Wheat Field",     emoji:"🌾", level:1,  safe:false, conn:["farmers_market","country_road","abandoned_farm"] },
+  apple_orchard:    { name:"Apple Orchard",   emoji:"🍎", level:1,  safe:false, conn:["farmers_market","country_road"] },
+  country_road:     { name:"Country Road",    emoji:"🛤️", level:1,  safe:false, conn:["farmers_market","wheat_field","apple_orchard","stone_bridge"] },
+  pebble_beach:     { name:"Pebble Beach",    emoji:"🪨", level:1,  safe:false, conn:["calm_lake","riverside_camp"] },
+  stone_bridge:     { name:"Stone Bridge",    emoji:"🌉", level:1,  safe:false, conn:["lakeside_inn","willow_grove","country_road","rushing_river"] },
+  clover_field:     { name:"Clover Field",    emoji:"🍀", level:1,  safe:false, conn:["green_meadow"] },
+  rushing_river:    { name:"Rushing River",   emoji:"🌊", level:2,  safe:false, conn:["riverside_camp","stone_bridge","pine_forest"] },
+  pine_forest:      { name:"Pine Forest",     emoji:"🌲", level:2,  safe:false, conn:["woodland_outpost","rushing_river","oak_woodland"] },
+  oak_woodland:     { name:"Oak Woodland",    emoji:"🌳", level:2,  safe:false, conn:["woodland_outpost","pine_forest","hunters_trail"] },
+  hunters_trail:    { name:"Hunter's Trail",  emoji:"🥾", level:2,  safe:false, conn:["woodland_outpost","oak_woodland","bramble_thicket"] },
+  bramble_thicket:  { name:"Bramble Thicket", emoji:"🌿", level:2,  safe:false, conn:["hunters_trail","mossy_cave"] },
+  mossy_cave:       { name:"Mossy Cave",      emoji:"🕳️", level:2,  safe:false, conn:["bramble_thicket"] },
+  muddy_swamp:      { name:"Muddy Swamp",     emoji:"🐸", level:2,  safe:false, conn:["shallow_pond"] },
+  abandoned_farm:   { name:"Abandoned Farm",  emoji:"🏚️", level:2,  safe:false, conn:["wheat_field"] },
+  old_bridge:       { name:"Old Bridge",      emoji:"🌉", level:2,  safe:false, conn:["trading_post","flower_garden","misty_grove"] },
+  misty_grove:      { name:"Misty Grove",     emoji:"🌫️", level:2,  safe:false, conn:["fishing_village","old_bridge","shallow_pond","mushroom_patch"] },
+  mushroom_patch:   { name:"Mushroom Patch",  emoji:"🍄", level:2,  safe:false, conn:["misty_grove","berry_thicket"] },
+  berry_thicket:    { name:"Berry Thicket",   emoji:"🫐", level:2,  safe:false, conn:["mushroom_patch","rocky_path"] },
+  rocky_path:       { name:"Rocky Path",      emoji:"🪨", level:2,  safe:false, conn:["berry_thicket","windy_cliff"] },
+  windy_cliff:      { name:"Windy Cliff",     emoji:"🌬️", level:3,  safe:false, conn:["rocky_path","ancient_oak","whispering_canyon"] },
+  ancient_oak:      { name:"Ancient Oak",     emoji:"🌳", level:3,  safe:false, conn:["windy_cliff","hidden_cave","forgotten_shrine"] },
+  hidden_cave:      { name:"Hidden Cave",     emoji:"🕳️", level:3,  safe:false, conn:["ancient_oak"] },
+  forgotten_shrine: { name:"Forgotten Shrine",emoji:"⛩️", level:3,  safe:false, conn:["ancient_oak","bamboo_forest","twilight_meadow"] },
+  bamboo_forest:    { name:"Bamboo Forest",   emoji:"🎋", level:3,  safe:false, conn:["forgotten_shrine","twilight_meadow","jade_temple"] },
+  twilight_meadow:  { name:"Twilight Meadow", emoji:"🌅", level:3,  safe:false, conn:["forgotten_shrine","bamboo_forest","jade_temple","shadow_woods"] },
+  shadow_woods:     { name:"Shadow Woods",    emoji:"🌑", level:4,  safe:false, conn:["jade_temple","twilight_meadow","haunted_hollow","iron_mine","forgotten_crypt_entrance"] },
+  haunted_hollow:   { name:"Haunted Hollow",  emoji:"👻", level:4,  safe:false, conn:["shadow_woods","forgotten_crypt_entrance"] },
+  iron_mine:        { name:"Iron Mine",       emoji:"⚒️", level:4,  safe:false, conn:["jade_temple","shadow_woods","copper_canyon","miners_rest"] },
+  copper_canyon:    { name:"Copper Canyon",   emoji:"🏜️", level:4,  safe:false, conn:["iron_mine","miners_rest","silver_lake","bandit_hideout"] },
+  bandit_hideout:   { name:"Bandit Hideout",  emoji:"🏴",  level:4,  safe:false, conn:["copper_canyon"] },
+  silver_lake:      { name:"Silver Lake",     emoji:"🌊", level:4,  safe:false, conn:["miners_rest","copper_canyon","moonlit_shore","enchanted_grove"] },
+  moonlit_shore:    { name:"Moonlit Shore",   emoji:"🌙", level:4,  safe:false, conn:["silver_lake"] },
+  scorched_dunes:   { name:"Scorched Dunes",  emoji:"🔥", level:4,  safe:false, conn:["desert_oasis","sandstorm_valley","volcanic_rift_gate","volcanic_ridge"] },
+  frozen_peaks:     { name:"Frozen Peaks",    emoji:"❄️", level:4,  safe:false, conn:["mountain_outpost","crystal_cavern","frozen_abyss_portal"] },
+  crystal_cavern:   { name:"Crystal Cavern",  emoji:"💎", level:4,  safe:false, conn:["mountain_outpost","frozen_peaks","deep_mines","frozen_abyss_portal"] },
+  volcanic_ridge:   { name:"Volcanic Ridge",  emoji:"🌋", level:4,  safe:false, conn:["mountain_outpost","magma_chamber","scorched_dunes","volcanic_rift_gate"] },
+  sandstorm_valley: { name:"Sandstorm Valley",emoji:"🌪️", level:4,  safe:false, conn:["desert_oasis","scorched_dunes","ancient_ruins"] },
+  enchanted_grove:  { name:"Enchanted Grove", emoji:"✨", level:5,  safe:false, conn:["silver_lake","fairy_village","mystic_waterfall"] },
+  mystic_waterfall: { name:"Mystic Waterfall",emoji:"💦", level:5,  safe:false, conn:["enchanted_grove","fairy_village","crystal_forest","hidden_grotto","sandy_beach"] },
+  hidden_grotto:    { name:"Hidden Grotto",   emoji:"🗿", level:5,  safe:false, conn:["mystic_waterfall"] },
+  crystal_forest:   { name:"Crystal Forest",  emoji:"💠", level:5,  safe:false, conn:["fairy_village","mystic_waterfall","prism_valley"] },
+  prism_valley:     { name:"Prism Valley",    emoji:"🌈", level:5,  safe:false, conn:["crystal_forest"] },
+  whispering_canyon:{ name:"Whispering Canyon",emoji:"🌬️",level:5,  safe:false, conn:["windy_cliff","echo_caves","thunder_peaks"] },
+  echo_caves:       { name:"Echo Caves",      emoji:"🔊", level:5,  safe:false, conn:["whispering_canyon","mountain_outpost"] },
+  sky_gardens:      { name:"Sky Gardens",     emoji:"🌸", level:5,  safe:false, conn:["floating_sanctuary","thunder_peaks","world_tree_peak"] },
+  deep_mines:       { name:"Deep Mines",      emoji:"⛏️", level:5,  safe:false, conn:["underground_city","crystal_cavern","crystal_labyrinth"] },
+  thunder_peaks:    { name:"Thunder Peaks",   emoji:"⚡", level:5,  safe:false, conn:["floating_sanctuary","sky_gardens","celestial_bridge","whispering_canyon"] },
+  ancient_ruins:    { name:"Ancient Ruins",   emoji:"🏺", level:5,  safe:false, conn:["desert_oasis","sandstorm_valley"] },
+  magma_chamber:    { name:"Magma Chamber",   emoji:"🔥", level:5,  safe:false, conn:["underground_city","volcanic_ridge","volcanic_rift_gate","demon_fortress"] },
+  spirit_realm:     { name:"Spirit Realm",    emoji:"👻", level:6,  safe:false, conn:["mystic_temple","void_gate","cursed_graveyard"] },
+  crystal_labyrinth:{ name:"Crystal Labyrinth",emoji:"🔮",level:6,  safe:false, conn:["underground_city","deep_mines","mystic_temple"] },
+  celestial_bridge: { name:"Celestial Bridge",emoji:"🌉", level:6,  safe:false, conn:["floating_sanctuary","thunder_peaks","astral_plane"] },
+  void_gate:        { name:"Void Gate",       emoji:"🌀", level:6,  safe:false, conn:["mystic_temple","spirit_realm","astral_plane"] },
+  astral_plane:     { name:"Astral Plane",    emoji:"✨", level:6,  safe:false, conn:["mystic_temple","celestial_bridge","void_gate"] },
+  abyssal_trench:   { name:"Abyssal Trench",  emoji:"🌊", level:6,  safe:false, conn:["underground_city"] },
+  cursed_graveyard: { name:"Cursed Graveyard",emoji:"⚰️", level:6,  safe:false, conn:["spirit_realm"] },
+  demon_fortress:   { name:"Demon Fortress",  emoji:"🏰", level:6,  safe:false, conn:["magma_chamber"] },
+  world_tree_peak:  { name:"World Tree Peak", emoji:"🌳", level:6,  safe:false, conn:["sky_gardens"] },
+};
+
+const POS = {
+  starter_village:  [200,230], green_meadow:[110,320], peaceful_forest:[240,340],
+  clover_field:[100,420], riverside_path:[160,430], trading_post:[350,200],
+  sunny_hills:[340,320], flower_garden:[400,400], old_bridge:[430,480],
+  fishing_village:[290,580], sandy_beach:[160,650], shallow_pond:[320,660],
+  misty_grove:[440,570], muddy_swamp:[450,680],
+  lakeside_inn:[590,210], calm_lake:[570,320], willow_grove:[660,320],
+  pebble_beach:[570,420], stone_bridge:[710,410], riverside_camp:[710,300],
+  farmers_market:[590,95], wheat_field:[500,155], apple_orchard:[610,155],
+  country_road:[650,240], abandoned_farm:[500,270],
+  woodland_outpost:[855,255], rushing_river:[790,390], pine_forest:[870,380],
+  oak_woodland:[945,315], hunters_trail:[985,400], bramble_thicket:[960,490],
+  mossy_cave:[870,510], mushroom_patch:[785,575], berry_thicket:[875,605],
+  rocky_path:[990,585],
+  windy_cliff:[1095,520], ancient_oak:[1145,430], hidden_cave:[1195,505],
+  forgotten_shrine:[1145,340], bamboo_forest:[1215,255], twilight_meadow:[1120,205],
+  jade_temple:[1225,155], whispering_canyon:[1095,615],
+  shadow_woods:[1320,205], haunted_hollow:[1380,300],
+  forgotten_crypt_entrance:[1450,205], iron_mine:[1320,135],
+  miners_rest:[1405,95], copper_canyon:[1450,165], bandit_hideout:[1510,250],
+  silver_lake:[1460,85], moonlit_shore:[1520,135],
+  mountain_outpost:[1295,470], echo_caves:[1215,560], frozen_peaks:[1365,410],
+  crystal_cavern:[1395,505], volcanic_ridge:[1295,575],
+  desert_oasis:[1365,770], scorched_dunes:[1285,840], sandstorm_valley:[1445,840],
+  ancient_ruins:[1505,775], volcanic_rift_gate:[1215,900],
+  mystic_waterfall:[300,820], enchanted_grove:[405,775], fairy_village:[490,775],
+  crystal_forest:[570,840], prism_valley:[630,920], hidden_grotto:[200,895],
+  floating_sanctuary:[710,65], sky_gardens:[830,65], thunder_peaks:[935,65],
+  celestial_bridge:[1040,65], world_tree_peak:[915,135],
+  underground_city:[810,870], deep_mines:[915,945], crystal_labyrinth:[710,960],
+  magma_chamber:[995,850],
+  mystic_temple:[1115,980], spirit_realm:[1215,1045], void_gate:[1165,1125],
+  astral_plane:[1065,1100], abyssal_trench:[790,1080], cursed_graveyard:[1315,1105],
+  demon_fortress:[1075,890], frozen_abyss_portal:[1465,555],
+};
+
+const LEVEL_COLOR = {
+  1:  { node:"#4ade80", edge:"#166534", glow:"#4ade8033" },
+  2:  { node:"#fbbf24", edge:"#92400e", glow:"#fbbf2433" },
+  3:  { node:"#f472b6", edge:"#831843", glow:"#f472b633" },
+  4:  { node:"#f87171", edge:"#7f1d1d", glow:"#f8717133" },
+  5:  { node:"#a78bfa", edge:"#4c1d95", glow:"#a78bfa33" },
+  6:  { node:"#e879f9", edge:"#701a75", glow:"#e879f933" },
+  10: { node:"#fb923c", edge:"#7c2d12", glow:"#fb923c33" },
+  20: { node:"#f87171", edge:"#7f1d1d", glow:"#f8717133" },
+  30: { node:"#60a5fa", edge:"#1e3a5f", glow:"#60a5fa33" },
+};
+
+const CW = 1600, CH = 1200;
+
+// ── Build edges ───────────────────────────────────────────────────────────────
+function buildEdges() {
+  const seen = new Set(), edges = [];
+  for (const [id, loc] of Object.entries(RAW)) {
+    for (const nb of loc.conn) {
+      const key = [id,nb].sort().join("|");
+      if (!seen.has(key) && POS[id] && POS[nb]) {
+        seen.add(key);
+        edges.push({ a:id, b:nb, level: Math.max(RAW[id].level, RAW[nb]?.level ?? 1) });
+      }
+    }
+  }
+  return edges;
+}
+const ALL_EDGES = buildEdges();
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let pan = { x:0, y:0 }, zoom = 0.55;
+let selectedId = null, hoveredId = null;
+let dragging = false, lastMouse = {x:0,y:0}, pinchDist = null;
+
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const viewport   = document.getElementById("viewport");
+const world      = document.getElementById("world");
+const edgesSvg   = document.getElementById("edges-svg");
+const infoPanel  = document.getElementById("info-panel");
+const statsEl    = document.getElementById("stats");
+const legendEl   = document.getElementById("legend");
+
+// ── Legend ────────────────────────────────────────────────────────────────────
+const legendLevels = [
+  [1,"Lv1"],[2,"Lv2"],[3,"Lv3"],[4,"Lv4"],[5,"Lv5"],[6,"Lv6"],
+  [10,"Lv10+"],[20,"Lv20+"],[30,"Lv30+"]
+];
+legendEl.innerHTML = legendLevels.map(([lv,label]) => {
+  const c = LEVEL_COLOR[lv]?.node || "#999";
+  return `<span class="legend-item">
+    <span class="legend-dot" style="background:${c}"></span>
+    <span class="legend-label" style="color:${c}">${label}</span>
+  </span>`;
+}).join("") + `<span style="color:#475569;font-size:9px;margin-left:8px">◼ safe &nbsp;● combat</span>`;
+
+// ── Stats ──────────────────────────────────────────────────────────────────────
+statsEl.textContent = `${Object.keys(RAW).length} locations · ${ALL_EDGES.length} connections`;
+
+// ── Initial pan (centre map) ───────────────────────────────────────────────────
+function initPan() {
+  const W = viewport.clientWidth, H = viewport.clientHeight;
+  pan = { x: W/2 - (CW*zoom)/2, y: H/2 - (CH*zoom)/2 };
+}
+initPan();
+
+// ── Apply transform ────────────────────────────────────────────────────────────
+function applyTransform() {
+  world.style.transform = `translate(${pan.x}px,${pan.y}px) scale(${zoom})`;
+  world.style.left = "0";
+  world.style.top  = "0";
+}
+// Use translate on world directly since transform-origin is 0 0
+world.style.transformOrigin = "0 0";
+world.style.position = "absolute";
+world.style.width = CW+"px";
+world.style.height = CH+"px";
+applyTransform();
+
+// ── Draw edges ────────────────────────────────────────────────────────────────
+function drawEdges() {
+  const focusNeighbors = selectedId
+    ? new Set([selectedId, ...RAW[selectedId].conn.filter(n=>POS[n])])
+    : hoveredId
+    ? new Set([hoveredId, ...RAW[hoveredId].conn.filter(n=>POS[n])])
+    : null;
+
+  let html = `<defs>
+    <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>`;
+  for (const {a,b,level} of ALL_EDGES) {
+    const [ax,ay]=POS[a],[bx,by]=POS[b];
+    const c = LEVEL_COLOR[level] || LEVEL_COLOR[1];
+    const dimmed = focusNeighbors && (!focusNeighbors.has(a)||!focusNeighbors.has(b));
+    html += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}"
+      stroke="${dimmed?"#1e3a5f":c.edge}"
+      stroke-width="${dimmed?1:2}"
+      stroke-opacity="${dimmed?0.25:0.85}"/>`;
+  }
+  edgesSvg.innerHTML = html;
+}
+
+// ── Draw nodes ────────────────────────────────────────────────────────────────
+const nodeEls = {};
+function createNodes() {
+  for (const [id, loc] of Object.entries(RAW)) {
+    if (!POS[id]) continue;
+    const [x,y] = POS[id];
+    const c = LEVEL_COLOR[loc.level] || LEVEL_COLOR[1];
+    const el = document.createElement("div");
+    el.className = "node";
+    el.dataset.id = id;
+    el.style.left = (x-22)+"px";
+    el.style.top  = (y-22)+"px";
+    el.style.width = "44px";
+    el.style.height = "44px";
+    el.style.zIndex = 10;
+
+    const circle = document.createElement("div");
+    circle.className = "node-circle";
+    circle.style.width = "26px";
+    circle.style.height = "26px";
+    circle.style.borderRadius = loc.safe ? "4px" : "50%";
+    circle.style.background = c.glow;
+    circle.style.border = `2px solid ${c.node}`;
+    circle.style.boxShadow = `0 0 4px ${c.node}88`;
+    circle.textContent = loc.emoji;
+
+    const label = document.createElement("div");
+    label.className = "node-label";
+    label.style.color = c.node;
+    label.style.borderColor = c.node+"66";
+    label.textContent = loc.name;
+
+    el.appendChild(circle);
+    el.appendChild(label);
+    world.appendChild(el);
+    nodeEls[id] = { el, circle, c, loc };
+
+    el.addEventListener("click", (e) => { e.stopPropagation(); selectNode(selectedId===id ? null : id); });
+    el.addEventListener("mouseenter", () => { hoveredId=id; updateNodeStyles(); drawEdges(); });
+    el.addEventListener("mouseleave", () => { hoveredId=null; updateNodeStyles(); drawEdges(); });
+  }
+}
+
+function updateNodeStyles() {
+  const focusNeighbors = selectedId
+    ? new Set([selectedId, ...RAW[selectedId].conn.filter(n=>POS[n])])
+    : hoveredId
+    ? new Set([hoveredId, ...RAW[hoveredId].conn.filter(n=>POS[n])])
+    : null;
+
+  for (const [id, {el, circle, c, loc}] of Object.entries(nodeEls)) {
+    const isSelected = id === selectedId;
+    const isHovered  = id === hoveredId;
+    const dimmed = focusNeighbors && !focusNeighbors.has(id);
+    const highlight = focusNeighbors && focusNeighbors.has(id) && id !== (selectedId||hoveredId);
+
+    el.style.opacity = dimmed ? "0.15" : "1";
+    el.style.zIndex  = isSelected ? "20" : isHovered ? "15" : "10";
+
+    const size = isSelected ? "34px" : highlight ? "30px" : "26px";
+    circle.style.width  = size;
+    circle.style.height = size;
+    circle.style.background = isSelected ? c.node : c.glow;
+    circle.style.boxShadow = (isSelected||isHovered) ? `0 0 14px ${c.node}` : `0 0 4px ${c.node}88`;
+    circle.style.fontSize = isSelected ? "16px" : "13px";
+
+    if (isSelected) el.classList.add("selected");
+    else el.classList.remove("selected");
+  }
+}
+
+function selectNode(id) {
+  selectedId = id;
+  updateNodeStyles();
+  drawEdges();
+  renderInfoPanel();
+}
+
+// ── Info panel ────────────────────────────────────────────────────────────────
+function renderInfoPanel() {
+  if (!selectedId) {
+    infoPanel.classList.remove("visible");
+    return;
+  }
+  const loc = RAW[selectedId];
+  const c = LEVEL_COLOR[loc.level]?.node || "#999";
+  infoPanel.style.borderColor = c+"55";
+  infoPanel.classList.add("visible");
+
+  document.getElementById("info-emoji").textContent = loc.emoji;
+  document.getElementById("info-name").textContent  = loc.name;
+
+  const tagsEl = document.getElementById("info-tags");
+  tagsEl.innerHTML =
+    `<span class="tag" style="background:${c}22;border:1px solid ${c}55;color:${c}">Lv ${loc.level}</span>` +
+    `<span class="tag" style="background:${loc.safe?"#4ade8022":"#f8717122"};border:1px solid ${loc.safe?"#4ade8055":"#f8717155"};color:${loc.safe?"#4ade80":"#f87171"}">${loc.safe?"🛡 SAFE":"⚔ COMBAT"}</span>`;
+
+  const connsEl = document.getElementById("info-conns");
+  connsEl.innerHTML = loc.conn.filter(n=>RAW[n]).map(nb => {
+    const n = RAW[nb];
+    const nc = LEVEL_COLOR[n.level]?.node || "#999";
+    return `<div class="conn-item" style="--accent:${nc}" onclick="selectNode('${nb}')">
+      <span class="conn-emoji">${n.emoji[0]}</span>
+      <div>
+        <div class="conn-name">${n.name}</div>
+        <div class="conn-sub" style="color:${nc}">Lv ${n.level} · ${n.safe?"Safe":"Combat"}</div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+document.getElementById("info-close").addEventListener("click", (e) => {
+  e.stopPropagation();
+  selectNode(null);
+});
+infoPanel.addEventListener("mousedown", e => e.stopPropagation());
+
+// ── Pan & Zoom ────────────────────────────────────────────────────────────────
+function clampPan() {
+  // allow some freedom but keep map reachable
+}
+
+function doZoom(factor, cx, cy) {
+  const nz = Math.min(3, Math.max(0.18, zoom * factor));
+  const scale = nz / zoom;
+  pan.x = cx - (cx - pan.x) * scale;
+  pan.y = cy - (cy - pan.y) * scale;
+  zoom = nz;
+  applyTransform();
+}
+
+// Mouse
+viewport.addEventListener("mousedown", e => {
+  if (e.target.closest(".node") || e.target.closest("#info-panel") || e.target.closest("#zoom-controls")) return;
+  dragging = true;
+  lastMouse = { x:e.clientX, y:e.clientY };
+  viewport.classList.add("dragging");
+});
+window.addEventListener("mousemove", e => {
+  if (!dragging) return;
+  pan.x += e.clientX - lastMouse.x;
+  pan.y += e.clientY - lastMouse.y;
+  lastMouse = { x:e.clientX, y:e.clientY };
+  applyTransform();
+});
+window.addEventListener("mouseup", () => { dragging=false; viewport.classList.remove("dragging"); });
+
+// Wheel
+viewport.addEventListener("wheel", e => {
+  e.preventDefault();
+  const rect = viewport.getBoundingClientRect();
+  doZoom(e.deltaY < 0 ? 1.12 : 0.9, e.clientX-rect.left, e.clientY-rect.top);
+}, { passive:false });
+
+// Touch
+viewport.addEventListener("touchstart", e => {
+  if (e.touches.length === 1) {
+    if (e.target.closest(".node") || e.target.closest("#info-panel") || e.target.closest("#zoom-controls")) return;
+    dragging = true;
+    lastMouse = { x:e.touches[0].clientX, y:e.touches[0].clientY };
+  } else if (e.touches.length === 2) {
+    dragging = false;
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    pinchDist = Math.sqrt(dx*dx+dy*dy);
+  }
+}, { passive:true });
+
+viewport.addEventListener("touchmove", e => {
+  e.preventDefault();
+  if (e.touches.length === 1 && dragging) {
+    pan.x += e.touches[0].clientX - lastMouse.x;
+    pan.y += e.touches[0].clientY - lastMouse.y;
+    lastMouse = { x:e.touches[0].clientX, y:e.touches[0].clientY };
+    applyTransform();
+  } else if (e.touches.length === 2 && pinchDist !== null) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.sqrt(dx*dx+dy*dy);
+    const rect = viewport.getBoundingClientRect();
+    const cx = (e.touches[0].clientX+e.touches[1].clientX)/2 - rect.left;
+    const cy = (e.touches[0].clientY+e.touches[1].clientY)/2 - rect.top;
+    doZoom(dist/pinchDist, cx, cy);
+    pinchDist = dist;
+  }
+}, { passive:false });
+
+viewport.addEventListener("touchend", () => { dragging=false; pinchDist=null; });
+
+// Zoom buttons
+document.getElementById("btn-zoomin").addEventListener("click", () => {
+  const W=viewport.clientWidth, H=viewport.clientHeight;
+  doZoom(1.2, W/2, H/2);
+});
+document.getElementById("btn-zoomout").addEventListener("click", () => {
+  const W=viewport.clientWidth, H=viewport.clientHeight;
+  doZoom(0.8, W/2, H/2);
+});
+document.getElementById("btn-reset").addEventListener("click", () => {
+  zoom = 0.55;
+  const W=viewport.clientWidth, H=viewport.clientHeight;
+  pan = { x: W/2-(CW*zoom)/2, y: H/2-(CH*zoom)/2 };
+  applyTransform();
+});
+
+// Deselect on viewport click
+viewport.addEventListener("click", e => {
+  if (!e.target.closest(".node") && !e.target.closest("#info-panel") && !e.target.closest("#zoom-controls")) {
+    selectNode(null);
+  }
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+createNodes();
+drawEdges();
+applyTransform();
+</script>
+</body>
+</html>
